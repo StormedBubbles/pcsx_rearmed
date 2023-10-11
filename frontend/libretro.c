@@ -271,25 +271,47 @@ static void convert(void *buf, size_t bytes)
 }
 #endif
 
-// Function to add a crosshair
-void addCrosshair(int port, int crosshair_color, unsigned short *buffer, int bufferStride, int gunx, int guny, int thickness, int size_x, int size_y) {
+// Function to add crosshairs
+static void addCrosshair(int port, int crosshair_color, unsigned short *buffer, int bufferStride, int pos_x, int pos_y, int thickness, int size_x, int size_y) {
    for (port = 0; port < 2; port++) {
       // Draw the horizontal line of the crosshair
-      for (int i = guny - thickness / 2; i <= guny + thickness / 2; i++) {
-         for (int j = gunx - size_x / 2; j <= gunx + size_x / 2; j++) {
+      for (int i = pos_y - thickness / 2; i <= pos_y + thickness / 2; i++) {
+         for (int j = pos_x - size_x / 2; j <= pos_x + size_x / 2; j++) {
             if ((i + vout_height) >= 0 && (i + vout_height) < bufferStride && j >= 0 && j < bufferStride && in_enable_crosshair[port] > 0)
                buffer[i * bufferStride + j] = crosshair_color;
       }
          }
 
       // Draw the vertical line of the crosshair
-      for (int i = gunx - thickness / 2; i <= gunx + thickness / 2; i++) {
-         for (int j = guny - size_y / 2; j <= guny + size_y / 2; j++) {
+      for (int i = pos_x - thickness / 2; i <= pos_x + thickness / 2; i++) {
+         for (int j = pos_y - size_y / 2; j <= pos_y + size_y / 2; j++) {
             if (i >= 0 && i < bufferStride && (j + vout_height) >= 0 && (j + vout_height) < bufferStride && in_enable_crosshair[port] > 0)
                buffer[j * bufferStride + i] = crosshair_color;
          }
       }
    }
+}
+
+struct CrosshairInfo {
+    int pos_x;
+    int pos_y;
+    int thickness;
+    int size_x;
+    int size_y;
+};
+
+// Calculate size and position of crosshairs
+static void CrosshairDimensions(int port, struct CrosshairInfo *info) {
+   int gunx = input_state_cb(port, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X);
+   int guny = input_state_cb(port, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y);
+   if (gunx == 32767) // Prevent crosshairs from wrapping around right side of screen to left
+      info->pos_x = (gunx + 32767.0f) * vout_width / 65534.0f - 0.5f;
+   else
+      info->pos_x = (gunx + 32767.0f) * vout_width / 65534.0f;
+   info->pos_y = (guny + 32767.0f) * vout_height / 65534.0f - vout_height;
+   info->thickness = pl_rearmed_cbs.gpu_neon.enhancement_enable ? 4 : 2;
+   info->size_x = psx_w * (pl_rearmed_cbs.gpu_neon.enhancement_enable ? 2 : 1) / 40.0f;
+   info->size_y = psx_h * (pl_rearmed_cbs.gpu_neon.enhancement_enable ? 2 : 1) * (4.0f / 3.0f) / 40.0f;
 }
 
 static void vout_flip(const void *vram, int stride, int bgr24,
@@ -326,19 +348,12 @@ static void vout_flip(const void *vram, int stride, int bgr24,
       }
    }
 
-   // Add the crosshair at a specified position (gunx, guny)
-   int crosshairSize_t = pl_rearmed_cbs.gpu_neon.enhancement_enable ? 4 : 2;
-   int crosshairSize_x = psx_w * (pl_rearmed_cbs.gpu_neon.enhancement_enable ? 2 : 1) / 40.0f;
-   int crosshairSize_y = psx_h * (pl_rearmed_cbs.gpu_neon.enhancement_enable ? 2 : 1) * (4.0f / 3.0f) / 40.0f;
    for (port = 0; port < 2; port++) {
-      int gunx = (input_state_cb(port, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X) + 32767.0f) * dstride / 65534.0f;
-      int guny = (input_state_cb(port, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y) + 32767.0f) * vout_height / 65534.0f - vout_height;
       if (in_enable_crosshair[port] > 0 && (in_type[port] == PSE_PAD_TYPE_GUNCON || in_type[port] == PSE_PAD_TYPE_GUN))
       {
-         if (gunx == dstride)
-            addCrosshair(port, in_enable_crosshair[port], dest, dstride, gunx - 0.5f, guny, crosshairSize_t, crosshairSize_x, crosshairSize_y);
-	 else
-            addCrosshair(port, in_enable_crosshair[port], dest, dstride, gunx, guny, crosshairSize_t, crosshairSize_x, crosshairSize_y);
+	 struct CrosshairInfo crosshairInfo;
+	 CrosshairDimensions(port, &crosshairInfo);;
+         addCrosshair(port, in_enable_crosshair[port], dest, dstride, crosshairInfo.pos_x, crosshairInfo.pos_y, crosshairInfo.thickness, crosshairInfo.size_x, crosshairInfo.size_y);
       }
    }
 
